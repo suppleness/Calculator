@@ -11,7 +11,7 @@
         .calc-container { width: 100%; max-width: 375px; padding: 0 16px; display: flex; flex-direction: column; }
         
         .screen-container { width: 100%; display: flex; flex-direction: column; justify-content: flex-end; min-height: 140px; padding: 0 10px; margin-bottom: 10px; text-align: right; box-sizing: border-box; }
-        .history { color: #7c7c7e; font-size: 22px; font-weight: 400; min-height: 26px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: right; }
+        .history { color: #7c7c7e; font-size: 22px; font-weight: 400; min-height: 26px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: ltr; text-align: right; }
         
         .main-display { color: #fff; font-size: 72px; font-weight: 300; line-height: 1.1; white-space: nowrap; overflow: hidden; letter-spacing: -0.5px; }
         
@@ -66,19 +66,21 @@
 <script>
     const FORCE_NUMBER = "4290411351073"; 
 
-    let currentInput = "0";      // What is actively being typed
-    let activeVisual = "0";      // What actually shows on the main display
-    let mathTrack = "";          // Running formula string behind the scenes
+    let currentInput = "0";      // What the user is typing right now
+    let runningTotal = 0;        // Hidden mathematical running evaluation total
+    let mathTrack = "";          // Running formula string displayed at the top
+    let lastOperator = "";       // Stores the active operation modifier
+    
     let isArmed = false;
     let lastClearTime = 0;
     let justEvaluated = false;
-    let awaitingNewInput = false; // Prevents the screen from wiping until a new digit is touched
+    let awaitingNewInput = false; 
 
     const mainDisplay = document.getElementById("main-display");
     const historyDisplay = document.getElementById("history-display");
 
-    function updateDisplay() {
-        mainDisplay.innerText = formatLocale(activeVisual);
+    function updateDisplay(valueToShow) {
+        mainDisplay.innerText = formatLocale(String(valueToShow));
         historyDisplay.innerText = mathTrack;
 
         let length = mainDisplay.innerText.length;
@@ -104,10 +106,11 @@
         if (justEvaluated) {
             currentInput = num;
             mathTrack = "";
+            runningTotal = 0;
+            lastOperator = "";
             justEvaluated = false;
             awaitingNewInput = false;
         } else if (awaitingNewInput) {
-            // Screen updates seamlessly here instead of dropping a raw '0' beforehand
             currentInput = num;
             awaitingNewInput = false;
         } else if (currentInput === "0" && num !== ".") {
@@ -117,24 +120,61 @@
             if (currentInput.replace(/,/g, '').length >= 16) return;
             currentInput += num;
         }
-        activeVisual = currentInput;
-        updateDisplay();
+        updateDisplay(currentInput);
+    }
+
+    function runInternalMath(val1, val2, op) {
+        if (!op) return val2;
+        switch(op) {
+            case '+': return val1 + val2;
+            case '-': return val1 - val2;
+            case '×': return val1 * val2;
+            case '÷': return val2 === 0 ? "Error" : val1 / val2;
+            case '%': return val1 * (val2 * 0.01);
+            default: return val2;
+        }
     }
 
     function appendOp(op) {
         if (justEvaluated) {
-            mathTrack = currentInput + " " + op + " ";
+            mathTrack = mainDisplay.innerText.replace(/,/g, '') + " " + op + " ";
+            runningTotal = parseFloat(mainDisplay.innerText.replace(/,/g, ''));
+            lastOperator = op;
             justEvaluated = false;
-        } else if (awaitingNewInput && mathTrack !== "") {
-            // If they change their mind on the operator, swap it smoothly out
-            mathTrack = mathTrack.slice(0, -3) + " " + op + " ";
-        } else {
-            mathTrack += currentInput + " " + op + " ";
+            awaitingNewInput = true;
+            updateDisplay(runningTotal);
+            return;
         }
-        
-        activeVisual = currentInput; // Keeps the number visible on the screen!
-        awaitingNewInput = true;     // Instructs it to clear out on the next numerical keypress
-        updateDisplay();
+
+        let inputValue = parseFloat(currentInput);
+
+        if (awaitingNewInput) {
+            // Swap last operator smoothly if clicked out of order
+            if (mathTrack !== "") {
+                mathTrack = mathTrack.slice(0, -2) + op + " ";
+                lastOperator = op;
+                updateDisplay(runningTotal);
+            }
+            return;
+        }
+
+        if (lastOperator === "") {
+            runningTotal = inputValue;
+        } else {
+            let result = runInternalMath(runningTotal, inputValue, lastOperator);
+            if (result === "Error") {
+                handleClear();
+                updateDisplay("Error");
+                return;
+            }
+            runningTotal = result;
+        }
+
+        mathTrack += currentInput + " " + op + " ";
+        lastOperator = op;
+        currentInput = String(runningTotal);
+        awaitingNewInput = true;
+        updateDisplay(runningTotal);
     }
 
     function handleClear() {
@@ -150,11 +190,12 @@
         lastClearTime = currentTime;
 
         currentInput = "0";
-        activeVisual = "0";
+        runningTotal = 0;
         mathTrack = "";
+        lastOperator = "";
         awaitingNewInput = false;
         justEvaluated = false;
-        updateDisplay();
+        updateDisplay("0");
     }
 
     function handleBackspace() {
@@ -164,8 +205,7 @@
         } else {
             currentInput = "0";
         }
-        activeVisual = currentInput;
-        updateDisplay();
+        updateDisplay(currentInput);
     }
 
     function handlePlusMinus() {
@@ -175,8 +215,7 @@
             } else {
                 currentInput = "-" + currentInput;
             }
-            activeVisual = currentInput;
-            updateDisplay();
+            updateDisplay(currentInput);
         }
     }
 
@@ -184,36 +223,36 @@
         if (isArmed) {
             mathTrack = ""; 
             currentInput = FORCE_NUMBER;
-            activeVisual = FORCE_NUMBER;
+            runningTotal = parseFloat(FORCE_NUMBER);
+            lastOperator = "";
             isArmed = false; 
             justEvaluated = true;
             awaitingNewInput = false;
-            updateDisplay();
+            updateDisplay(FORCE_NUMBER);
             return;
         }
 
-        if(mathTrack === "") return;
+        if (lastOperator === "" || awaitingNewInput) return;
 
-        try {
-            mathTrack += currentInput;
-            let cleanFormula = mathTrack.replace(/÷/g, '/').replace(/×/g, '*').replace(/−/g, '-').replace(/%/g, '*0.01');
-            let result = eval(cleanFormula);
-            
-            if (result % 1 !== 0) {
-                result = parseFloat(result.toFixed(4));
-            }
-            
-            currentInput = String(result);
-            activeVisual = String(result);
-            mathTrack = "";
-            justEvaluated = true;
-            awaitingNewInput = false;
-        } catch (e) {
-            currentInput = "Error";
-            activeVisual = "Error";
-            mathTrack = "";
+        let inputValue = parseFloat(currentInput);
+        let finalResult = runInternalMath(runningTotal, inputValue, lastOperator);
+
+        if (finalResult === "Error") {
+            updateDisplay("Error");
+            return;
         }
-        updateDisplay();
+
+        if (finalResult % 1 !== 0) {
+            finalResult = parseFloat(finalResult.toFixed(4));
+        }
+
+        currentInput = String(finalResult);
+        runningTotal = finalResult;
+        mathTrack = "";
+        lastOperator = "";
+        justEvaluated = true;
+        awaitingNewInput = false;
+        updateDisplay(finalResult);
     }
 </script>
 
