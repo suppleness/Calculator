@@ -8,17 +8,13 @@
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif; user-select: none; -webkit-tap-highlight-color: transparent; }
         body { background-color: #000; display: flex; justify-content: center; align-items: flex-end; height: 100vh; overflow: hidden; padding-bottom: 20px; }
         
-        /* Fixed max-width box ensuring it locks tightly inside phone frame limits */
         .calc-container { width: 100%; max-width: 375px; padding: 0 16px; display: flex; flex-direction: column; }
         
-        /* Cleaned screen box preventing unexpected wrapping or pushes */
         .screen-container { width: 100%; display: flex; flex-direction: column; justify-content: flex-end; min-height: 140px; padding: 0 10px; margin-bottom: 10px; text-align: right; box-sizing: border-box; }
-        .history { color: #7c7c7e; font-size: 22px; font-weight: 400; min-height: 26px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .history { color: #7c7c7e; font-size: 22px; font-weight: 400; min-height: 26px; margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: right; }
         
-        /* Prevents jumping layout when forced numbers drop in */
         .main-display { color: #fff; font-size: 72px; font-weight: 300; line-height: 1.1; white-space: nowrap; overflow: hidden; letter-spacing: -0.5px; }
         
-        /* Clean 4-column balanced layout matching standard grids */
         .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; width: 100%; }
         button { border: none; border-radius: 50%; aspect-ratio: 1; font-size: 32px; font-weight: 400; cursor: pointer; display: flex; justify-content: center; align-items: center; transition: background-color 0.1s; width: 100%; }
         button:active { filter: brightness(130%); }
@@ -70,20 +66,21 @@
 <script>
     const FORCE_NUMBER = "4290411351073"; 
 
-    let currentInput = "0";
-    let mathTrack = "";
+    let currentInput = "0";      // What is actively being typed
+    let activeVisual = "0";      // What actually shows on the main display
+    let mathTrack = "";          // Running formula string behind the scenes
     let isArmed = false;
     let lastClearTime = 0;
     let justEvaluated = false;
+    let awaitingNewInput = false; // Prevents the screen from wiping until a new digit is touched
 
     const mainDisplay = document.getElementById("main-display");
     const historyDisplay = document.getElementById("history-display");
 
     function updateDisplay() {
-        mainDisplay.innerText = formatLocale(currentInput);
+        mainDisplay.innerText = formatLocale(activeVisual);
         historyDisplay.innerText = mathTrack;
 
-        // Hardcoded scaling thresholds optimized for phone screens
         let length = mainDisplay.innerText.length;
         if (length > 15) mainDisplay.style.fontSize = "30px";
         else if (length > 11) mainDisplay.style.fontSize = "36px"; 
@@ -108,22 +105,35 @@
             currentInput = num;
             mathTrack = "";
             justEvaluated = false;
+            awaitingNewInput = false;
+        } else if (awaitingNewInput) {
+            // Screen updates seamlessly here instead of dropping a raw '0' beforehand
+            currentInput = num;
+            awaitingNewInput = false;
         } else if (currentInput === "0" && num !== ".") {
             currentInput = num;
         } else {
             if(num === "." && currentInput.includes(".")) return;
-            // Prevent manual entry from spilling over frame layout bounds
             if (currentInput.replace(/,/g, '').length >= 16) return;
             currentInput += num;
         }
+        activeVisual = currentInput;
         updateDisplay();
     }
 
     function appendOp(op) {
-        justEvaluated = false;
-        if (currentInput === "0" && mathTrack !== "") return;
-        mathTrack += currentInput + " " + op + " ";
-        currentInput = "0";
+        if (justEvaluated) {
+            mathTrack = currentInput + " " + op + " ";
+            justEvaluated = false;
+        } else if (awaitingNewInput && mathTrack !== "") {
+            // If they change their mind on the operator, swap it smoothly out
+            mathTrack = mathTrack.slice(0, -3) + " " + op + " ";
+        } else {
+            mathTrack += currentInput + " " + op + " ";
+        }
+        
+        activeVisual = currentInput; // Keeps the number visible on the screen!
+        awaitingNewInput = true;     // Instructs it to clear out on the next numerical keypress
         updateDisplay();
     }
 
@@ -140,16 +150,21 @@
         lastClearTime = currentTime;
 
         currentInput = "0";
+        activeVisual = "0";
         mathTrack = "";
+        awaitingNewInput = false;
+        justEvaluated = false;
         updateDisplay();
     }
 
     function handleBackspace() {
+        if (awaitingNewInput) return;
         if (currentInput.length > 1) {
             currentInput = currentInput.slice(0, -1);
         } else {
             currentInput = "0";
         }
+        activeVisual = currentInput;
         updateDisplay();
     }
 
@@ -160,6 +175,7 @@
             } else {
                 currentInput = "-" + currentInput;
             }
+            activeVisual = currentInput;
             updateDisplay();
         }
     }
@@ -168,8 +184,10 @@
         if (isArmed) {
             mathTrack = ""; 
             currentInput = FORCE_NUMBER;
+            activeVisual = FORCE_NUMBER;
             isArmed = false; 
             justEvaluated = true;
+            awaitingNewInput = false;
             updateDisplay();
             return;
         }
@@ -186,10 +204,13 @@
             }
             
             currentInput = String(result);
+            activeVisual = String(result);
             mathTrack = "";
             justEvaluated = true;
+            awaitingNewInput = false;
         } catch (e) {
             currentInput = "Error";
+            activeVisual = "Error";
             mathTrack = "";
         }
         updateDisplay();
